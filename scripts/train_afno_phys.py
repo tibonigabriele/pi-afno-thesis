@@ -127,7 +127,7 @@ def main():
         grad_clip=1.0,
         augment_fn=augment_fn,
         target_stats=target_stats,   # used for σ-MAE reporting in logs
-        normalize_loss=False,        # AFNO-Phys: loss reported on the raw scale
+        normalize_loss=True,        # normalize data loss by target stddev
     )
 
 
