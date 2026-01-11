@@ -119,7 +119,7 @@ def main():
         grad_clip=1.0,
         augment_fn=None,            # no frequency augmentation: physics term only
         target_stats=target_stats,  # used for σ-MAE reporting in logs
-        normalize_loss=True,       # normalize data loss by target stddev
+        normalize_loss=False,       # explicitly disabled: report loss on the raw scale
     )
 
 

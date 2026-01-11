@@ -211,7 +211,7 @@ def train_model(
     grad_clip: Optional[float] = None,
     augment_fn: Optional[Callable[[torch.Tensor, torch.Tensor], tuple]] = None,
     target_stats: Optional[dict] = None,
-    normalize_loss: bool = True,  # default True to preserve baseline behavior
+    normalize_loss: bool = False,  # If True, compute loss in standardized target space
 ):
     """
     Generic training loop for supervised (and optionally physics-informed) learning.

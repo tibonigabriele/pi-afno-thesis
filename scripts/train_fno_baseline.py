@@ -98,7 +98,7 @@ def main():
         grad_clip=1.0,
         augment_fn=None,
         target_stats=target_stats,
-        normalize_loss=True,      # normalize data loss by target stddev
+        normalize_loss=False,      # explicitly disabled: report loss on the raw scale
     )
 
 
