@@ -57,6 +57,7 @@ def build_barrier_dataset(
     grid_size_spatial: int = 96,
     grid_size_time: int = 96,
     seed: int = 42,
+    norm_ref_path: str | None = None,
 ):
     """
     Build barrier_dataset.pt starting from a CSV of vanilla option-chain quotes.
@@ -73,10 +74,10 @@ def build_barrier_dataset(
         B = S * (1 + u), with u ∈ [barrier_low, barrier_high].
 
     The output .pt file contains:
-        - inputs:  [N, 6, 1, 1]   (log_moneyness, sigma_imp, r, T, B/S, is_call)
+        - inputs:  [N, 6, 1, 1]   (min-max normalized features)
         - targets: [N, 3, 1, 1]   (price, delta, vega)
-        - x_min:   [6]            (per-feature min, used for normalization)
-        - x_max:   [6]            (per-feature max)
+        - x_min:   [6]            (per-feature min used for normalization)
+        - x_max:   [6]            (per-feature max used for normalization)
         - meta:    dictionary with additional dataset descriptors
     """
     np.random.seed(seed)
@@ -91,7 +92,6 @@ def build_barrier_dataset(
     if missing:
         raise ValueError(f"Missing columns in CSV: {missing}")
 
-    # Filter out invalid rows (e.g., non-positive maturities/volatilities).
     df = df.copy()
     df = df[(df["T"] > 0) & (df["sigma_imp"] > 0) & (df["S"] > 0) & (df["K"] > 0)]
     df = df.reset_index(drop=True)
@@ -109,11 +109,9 @@ def build_barrier_dataset(
     C_in = 6
     C_out = 3
 
-    # Pre-allocate tensors for efficiency.
     inputs = torch.zeros((n_samples, C_in, 1, 1), dtype=torch.float32)
     targets = torch.zeros((n_samples, C_out, 1, 1), dtype=torch.float32)
 
-    # Collect basic statistics for meta-information.
     S_values = []
     K_values = []
     T_values = []
@@ -135,7 +133,6 @@ def build_barrier_dataset(
         opt_type = str(row["type"]).strip().upper()
 
         if opt_type not in ("C", "P"):
-            # Skip rows with unrecognized option type.
             continue
 
         is_call = 1.0 if opt_type == "C" else 0.0
@@ -150,7 +147,6 @@ def build_barrier_dataset(
 
             B = S0 * (1.0 + u)
 
-            # Numerical labels via FD baseline (Crank–Nicolson + finite differences).
             try:
                 price = price_barrier_fd(
                     S0,
@@ -195,27 +191,26 @@ def build_barrier_dataset(
                 )
                 continue
 
-            # Input features.
             log_moneyness = math.log(S0 / K)
             B_over_S = B / S0
 
             x_vec = torch.tensor(
                 [
-                    log_moneyness,   # 0
-                    sigma_imp,       # 1
-                    r,               # 2
-                    T,               # 3
-                    B_over_S,        # 4
-                    is_call,         # 5
+                    log_moneyness,
+                    sigma_imp,
+                    r,
+                    T,
+                    B_over_S,
+                    is_call,
                 ],
                 dtype=torch.float32,
             )
 
             y_vec = torch.tensor(
                 [
-                    price,           # 0
-                    delta,           # 1
-                    vega,            # 2
+                    price,
+                    delta,
+                    vega,
                 ],
                 dtype=torch.float32,
             )
@@ -229,21 +224,27 @@ def build_barrier_dataset(
             "No valid samples were generated (e.g., the FD baseline failed for all rows)."
         )
 
-    # Shrink tensors if some combinations were skipped.
     inputs = inputs[:idx]
     targets = targets[:idx]
 
     print(f"Barrier-option dataset generation completed: {idx} samples created.")
 
-    # Input normalization: per-feature min-max across the dataset.
-    x_flat = inputs.view(idx, C_in)  # [N, C_in]
-    x_min, _ = x_flat.min(dim=0)
-    x_max, _ = x_flat.max(dim=0)
-    x_range = (x_max - x_min).clamp_min(1e-8)
+    if norm_ref_path is not None:
+        if not os.path.isfile(norm_ref_path):
+            raise FileNotFoundError(f"Normalization reference not found: {norm_ref_path}")
+        ref = torch.load(norm_ref_path, map_location="cpu")
+        if "x_min" not in ref or "x_max" not in ref:
+            raise ValueError("norm_ref_path must point to a .pt file containing x_min and x_max.")
+        x_min = ref["x_min"].float()
+        x_max = ref["x_max"].float()
+    else:
+        x_flat = inputs.view(idx, C_in)
+        x_min, _ = x_flat.min(dim=0)
+        x_max, _ = x_flat.max(dim=0)
 
+    x_range = (x_max - x_min).clamp_min(1e-8)
     inputs_norm = (inputs - x_min.view(1, C_in, 1, 1)) / x_range.view(1, C_in, 1, 1)
 
-    # Meta-information.
     S_values = np.array(S_values, dtype=float)
     K_values = np.array(K_values, dtype=float)
     T_values = np.array(T_values, dtype=float)
@@ -252,9 +253,6 @@ def build_barrier_dataset(
     K_min, K_max = float(K_values.min()), float(K_values.max())
     T_min, T_max = float(T_values.min()), float(T_values.max())
 
-    # Note: S_grid and t_grid are global placeholders.
-    # The FD solver internally adapts grids to each (S0, K, B, T) instance;
-    # these vectors are stored to support potential future extensions (e.g., physics losses).
     S_grid_global = torch.linspace(0.0, S_max * 4.0, grid_size_spatial)
     t_grid_global = torch.linspace(0.0, T_max, grid_size_time)
 
@@ -269,6 +267,7 @@ def build_barrier_dataset(
         "normalization": {
             "x_min": x_min,
             "x_max": x_max,
+            "ref_path": norm_ref_path,
         },
         "S_grid": S_grid_global,
         "t_grid": t_grid_global,
@@ -285,7 +284,6 @@ def build_barrier_dataset(
         "grid_size_time": grid_size_time,
     }
 
-    # Persist to disk.
     ensure_dir(os.path.dirname(output_path) or ".")
     torch.save(
         {
@@ -363,6 +361,12 @@ def parse_args():
         default=42,
         help="Random seed used for barrier generation (when non-deterministic).",
     )
+    parser.add_argument(
+        "--norm_ref_path",
+        type=str,
+        default=None,
+        help="Optional path to a .pt dataset artifact providing x_min/x_max to reuse for normalization.",
+    )
     return parser.parse_args()
 
 
@@ -378,4 +382,5 @@ if __name__ == "__main__":
         grid_size_spatial=args.grid_size_spatial,
         grid_size_time=args.grid_size_time,
         seed=args.seed,
+        norm_ref_path=args.norm_ref_path,
     )
