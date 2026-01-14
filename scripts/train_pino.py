@@ -101,6 +101,9 @@ def main():
         x_min=x_min,
         x_max=x_max,
         lambda_barrier=1.0,
+        # Keep physics loss numerically comparable with a normalized supervised loss.
+        # (Scale residual and barrier penalty by the dataset price std.)
+        price_scale=target_stats["std"][0],
     )
 
     # === Training loop ===
@@ -119,7 +122,7 @@ def main():
         grad_clip=1.0,
         augment_fn=None,            # no frequency augmentation: physics term only
         target_stats=target_stats,  # used for σ-MAE reporting in logs
-        normalize_loss=False,       # explicitly disabled: report loss on the raw scale
+        normalize_loss=True,       # normalize data loss by target stddev
     )
 
 

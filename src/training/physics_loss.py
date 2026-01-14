@@ -60,6 +60,7 @@ def make_black_scholes_physics_loss(
     x_min: torch.Tensor,
     x_max: torch.Tensor,
     lambda_barrier: float = 1.0,
+    price_scale: Union[float, torch.Tensor] = 1.0,
 ) -> Callable:
     """
     Build a Black–Scholes physics-informed loss with a barrier consistency term,
@@ -78,6 +79,20 @@ def make_black_scholes_physics_loss(
           5: is_call
     lambda_barrier : float
         Weight of the barrier penalty term.
+    price_scale : float | torch.Tensor
+        Scaling factor used to make the physics loss numerically comparable with a
+        normalized supervised loss (when `normalize_loss=True`).
+
+        In this codebase, the supervised loss can be computed on standardized
+        targets (z-scores), while the Black–Scholes residual and barrier penalty
+        are naturally expressed in raw price units. Setting `price_scale` to the
+        dataset standard deviation of the *price* target (e.g., `std_price`) turns
+        the physics terms into an approximately unitless quantity:
+
+            pde_loss = E[(residual / std_price)^2]
+            barrier_loss = E[(V_B / std_price)^2]
+
+        Default is 1.0 (no scaling), preserving backward compatibility.
 
     Returns
     -------
@@ -96,6 +111,13 @@ def make_black_scholes_physics_loss(
     x_max = x_max.clone().detach()
     x_range = (x_max - x_min).clamp_min(1e-8)
 
+    # Physics-loss scaling (kept as a tensor on the appropriate device at runtime).
+    if isinstance(price_scale, torch.Tensor):
+        _price_scale = price_scale.clone().detach()
+    else:
+        _price_scale = torch.tensor(float(price_scale))
+    _price_scale = _price_scale.clamp_min(1e-8)
+
     def physics_loss_fn(
         model,
         batch: BatchType,
@@ -105,6 +127,8 @@ def make_black_scholes_physics_loss(
         # Extract inputs from the batch.
         inputs = _unpack_batch(batch)
         device = inputs.device
+
+        price_scale_d = _price_scale.to(device)
 
         B, C_in, _, _ = inputs.shape
         assert C_in >= 6, "This physics loss assumes at least 6 input features."
@@ -162,7 +186,9 @@ def make_black_scholes_physics_loss(
             )
             residual = dV_dT - pde_rhs
 
-            pde_loss = (residual**2).mean()
+            # Scale physics residual to be numerically comparable with a
+            # standardized supervised loss.
+            pde_loss = ((residual / price_scale_d) ** 2).mean()
 
             # --- Barrier consistency: enforce V(S = B) ≈ 0 (up-and-out constraint). ---
 
@@ -179,7 +205,7 @@ def make_black_scholes_physics_loss(
             z_B = z_B.view(B, C_in, 1, 1).to(device)
 
             V_B = model(z_B)[:, 0, 0, 0]
-            barrier_loss = (V_B**2).mean()
+            barrier_loss = ((V_B / price_scale_d) ** 2).mean()
 
             total_phys = pde_loss + lambda_barrier * barrier_loss
 

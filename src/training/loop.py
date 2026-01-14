@@ -125,7 +125,7 @@ def _compute_mae_rmse(outputs: torch.Tensor, targets: torch.Tensor):
         reduce_dims = tuple(d for d in range(diff.ndim) if d != 1)
 
     mae = diff.abs().mean(dim=reduce_dims)
-    rmse = torch.sqrt((diff ** 2).mean(dim=reduce_dims))
+    rmse = torch.sqrt((diff**2).mean(dim=reduce_dims))
     return mae, rmse
 
 
@@ -211,7 +211,7 @@ def train_model(
     grad_clip: Optional[float] = None,
     augment_fn: Optional[Callable[[torch.Tensor, torch.Tensor], tuple]] = None,
     target_stats: Optional[dict] = None,
-    normalize_loss: bool = False,  # If True, compute loss in standardized target space
+    normalize_loss: bool = True,  # default True to preserve baseline behavior
 ):
     """
     Generic training loop for supervised (and optionally physics-informed) learning.
@@ -251,6 +251,10 @@ def train_model(
 
     best_val_loss = float("inf")
 
+    # Debug: print batch-level loss decomposition for the first epoch and first few batches.
+    # (This helps detect "physics loss not applied" or scale/logging issues.)
+    debug_first_epoch_batches = 2  # print for batch_idx < 2 in epoch 1
+
     for epoch in range(1, num_epochs + 1):
         # ==================== TRAIN ====================
         model.train()
@@ -261,7 +265,7 @@ def train_model(
         train_phys_loss_sum = 0.0
         n_train_phys_batches = 0
 
-        for batch in train_loader:
+        for batch_idx, batch in enumerate(train_loader):
             inputs, targets, batch_on_device = _move_batch_to_device(batch, device)
 
             if augment_fn is not None:
@@ -288,15 +292,43 @@ def train_model(
 
             # Optional physics loss term.
             if physics_loss_fn is not None and lambda_phys > 0.0:
-                phys_loss, _ = _call_physics_loss(
+                phys_loss, phys_info = _call_physics_loss(
                     physics_loss_fn, model, batch_on_device, outputs
                 )
                 loss = data_loss + lambda_phys * phys_loss
 
                 train_phys_loss_sum += phys_loss.item()
                 n_train_phys_batches += 1
+
+                # --- DEBUG PRINT (first epoch, first 2 batches) ---
+                if epoch == 1 and batch_idx < debug_first_epoch_batches:
+                    pde_loss = phys_info.get("pde_loss", None)
+                    barrier_loss = phys_info.get("barrier_loss", None)
+
+                    msg = (
+                        f"[dbg][train] epoch={epoch} batch={batch_idx} "
+                        f"data_loss={data_loss.item():.4e} "
+                        f"phys_loss={phys_loss.item():.4e} "
+                        f"lambda={lambda_phys:.3e} "
+                        f"total={loss.item():.4e}"
+                    )
+                    if pde_loss is not None or barrier_loss is not None:
+                        msg += (
+                            f" | pde_loss={pde_loss if pde_loss is not None else 'NA'} "
+                            f"barrier_loss={barrier_loss if barrier_loss is not None else 'NA'}"
+                        )
+                    print(msg)
             else:
                 loss = data_loss
+
+                # --- DEBUG PRINT (first epoch, first 2 batches) ---
+                if epoch == 1 and batch_idx < debug_first_epoch_batches:
+                    print(
+                        f"[dbg][train] epoch={epoch} batch={batch_idx} "
+                        f"data_loss={data_loss.item():.4e} "
+                        f"phys_loss=NA lambda={lambda_phys:.3e} "
+                        f"total={loss.item():.4e}"
+                    )
 
             loss.backward()
 
@@ -327,7 +359,7 @@ def train_model(
         all_targets = []
 
         with torch.no_grad():
-            for batch in val_loader:
+            for batch_idx, batch in enumerate(val_loader):
                 inputs, targets, batch_on_device = _move_batch_to_device(batch, device)
                 outputs = model(inputs)
 
@@ -340,15 +372,43 @@ def train_model(
                 )
 
                 if physics_loss_fn is not None and lambda_phys > 0.0:
-                    phys_loss, _ = _call_physics_loss(
+                    phys_loss, phys_info = _call_physics_loss(
                         physics_loss_fn, model, batch_on_device, outputs
                     )
                     loss = data_loss + lambda_phys * phys_loss
 
                     val_phys_loss_sum += phys_loss.item()
                     n_val_phys_batches += 1
+
+                    # --- DEBUG PRINT (first epoch, first 2 batches) ---
+                    if epoch == 1 and batch_idx < debug_first_epoch_batches:
+                        pde_loss = phys_info.get("pde_loss", None)
+                        barrier_loss = phys_info.get("barrier_loss", None)
+
+                        msg = (
+                            f"[dbg][val]   epoch={epoch} batch={batch_idx} "
+                            f"data_loss={data_loss.item():.4e} "
+                            f"phys_loss={phys_loss.item():.4e} "
+                            f"lambda={lambda_phys:.3e} "
+                            f"total={loss.item():.4e}"
+                        )
+                        if pde_loss is not None or barrier_loss is not None:
+                            msg += (
+                                f" | pde_loss={pde_loss if pde_loss is not None else 'NA'} "
+                                f"barrier_loss={barrier_loss if barrier_loss is not None else 'NA'}"
+                            )
+                        print(msg)
                 else:
                     loss = data_loss
+
+                    # --- DEBUG PRINT (first epoch, first 2 batches) ---
+                    if epoch == 1 and batch_idx < debug_first_epoch_batches:
+                        print(
+                            f"[dbg][val]   epoch={epoch} batch={batch_idx} "
+                            f"data_loss={data_loss.item():.4e} "
+                            f"phys_loss=NA lambda={lambda_phys:.3e} "
+                            f"total={loss.item():.4e}"
+                        )
 
                 val_running_loss += loss.item()
                 n_val_batches += 1
