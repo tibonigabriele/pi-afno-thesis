@@ -48,7 +48,7 @@ def main():
     weight_decay = 1e-4
     lambda_phys = 1.0  # physics-loss weight
 
-    checkpoint_dir = "checkpoints/fno_pino"
+    checkpoint_dir = "checkpoints/fno_pino_lam1"
     ensure_dir(checkpoint_dir)
 
     # === Data ===

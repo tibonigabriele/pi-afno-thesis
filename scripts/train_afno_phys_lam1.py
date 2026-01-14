@@ -46,7 +46,7 @@ def main():
     lr = 3e-4
     weight_decay = 1e-4
     lambda_phys = 0.1
-    checkpoint_dir = "checkpoints/afno_phys_full"
+    checkpoint_dir = "checkpoints/afno_phys_full_lam1"
     ensure_dir(checkpoint_dir)
 
     # Target statistics (consistent with the other training scripts).
