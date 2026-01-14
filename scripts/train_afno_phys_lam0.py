@@ -45,8 +45,8 @@ def main():
     num_epochs = 200
     lr = 3e-4
     weight_decay = 1e-4
-    lambda_phys = 0.0
-    checkpoint_dir = "checkpoints/afno_phys_full_lam0"
+    lambda_phys = 0.01
+    checkpoint_dir = "checkpoints/afno_phys_full"
     ensure_dir(checkpoint_dir)
 
     # Target statistics (consistent with the other training scripts).
@@ -100,14 +100,17 @@ def main():
         x_min=x_min,
         x_max=x_max,
         lambda_barrier=1.0,
+        # Keep physics loss numerically comparable with a normalized supervised loss.
+        # (Scale residual and barrier penalty by the dataset price std.)
+        price_scale=target_stats["std"][0],
     )
 
     # Frequency-domain augmentation (P-FTD-inspired): applied to inputs only.
     def augment_fn(batch_x: torch.Tensor, batch_y: torch.Tensor):
         batch_x_aug = fourier_augment_batch(
             batch_x,
-            prob=0.5,
-            max_scale=0.15,
+            prob=0.05,
+            max_scale=0.02,
         )
         return batch_x_aug, batch_y
 
@@ -127,7 +130,7 @@ def main():
         grad_clip=1.0,
         augment_fn=augment_fn,
         target_stats=target_stats,   # used for σ-MAE reporting in logs
-        normalize_loss=False,        # explicitly disabled: report loss on the raw scale
+        normalize_loss=True,        # normalize data loss by target stddev
     )
 
 
