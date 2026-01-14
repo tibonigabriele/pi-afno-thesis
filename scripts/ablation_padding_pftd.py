@@ -25,27 +25,58 @@
 import torch
 import torch.optim as optim
 
-from src.data.dataset_barrier import load_barrier_option_dataloaders
 from src.data.augment_pftd import pftd_augment
-from src.models.fno_family import FNOBarrier, AFNOBarrier
+from src.data.dataset_barrier import load_barrier_option_dataloaders
+from src.models.fno_family import FNOBarrier, FNOBarrierPINO, AFNOBarrierPINO
 from src.training.loop import train_model
-from src.utils.misc import set_seed, get_device, ensure_dir
+from src.training.physics_loss import make_black_scholes_physics_loss
+from src.utils.data_stats import compute_target_stats
+from src.utils.misc import ensure_dir, get_device, set_seed
 
 
-def run_experiment(
+def make_pftd_augment_fn(
+    keep_fraction: float = 0.6,
+    noise_std: float = 0.01,
+    pad_size: int = 4,
+    pad_mode: str = "mirror",
+):
+    # signature (x, y) -> (x_aug, y)
+    def augment_fn(batch_x: torch.Tensor, batch_y: torch.Tensor):
+        B = batch_x.shape[0]
+        augmented = []
+        for b in range(B):
+            augmented.append(
+                pftd_augment(
+                    batch_x[b],  # (C, H, W)
+                    keep_fraction=keep_fraction,
+                    noise_std=noise_std,
+                    pad_size=pad_size,
+                    pad_mode=pad_mode,
+                )
+            )
+        return torch.stack(augmented, dim=0), batch_y
+
+    return augment_fn
+
+
+def run_one(
     exp_name: str,
     model_class,
-    use_pftd: bool = False,
-    num_epochs: int = 20,
+    use_pftd: bool,
+    use_physics: bool,
+    *,
+    data_path: str,
+    batch_size: int,
+    num_epochs: int,
+    lr: float,
+    weight_decay: float,
+    lambda_phys: float,
 ):
     set_seed(42)
     device = get_device()
 
-    data_path = "data/barrier_dataset.pt"
-    batch_size = 32
-    lr = 1e-3
-    checkpoint_dir = f"checkpoints/ablation_{exp_name}"
-    ensure_dir(checkpoint_dir)
+    ckpt_dir = f"checkpoints/ablation_{exp_name}"
+    ensure_dir(ckpt_dir)
 
     train_loader, val_loader, meta = load_barrier_option_dataloaders(
         data_path=data_path,
@@ -56,59 +87,53 @@ def run_experiment(
 
     C_in = meta["C_in"]
     C_out = meta["C_out"]
+    x_min = meta.get("x_min")
+    x_max = meta.get("x_max")
 
     model = model_class(
         in_channels=C_in,
         out_channels=C_out,
-        width=64,
-        modes1=4,
-        modes2=4,
+        width=96,
+        modes1=6,
+        modes2=6,
         n_layers=4,
     )
 
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    optimizer = optim.Adam(
+        model.parameters(),
+        lr=lr,
+        weight_decay=weight_decay,
+    )
 
-    # Default setting: no data augmentation is applied.
-    augment_fn = None
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=0.5,
+        patience=15,
+    )
 
-    if use_pftd:
-        # P-FTD-style input augmentation:
-        # - applied exclusively to the input tensor batch_x
-        # - targets batch_y are returned unchanged
-        # The callable must respect the signature (x, y) -> (x_aug, y).
-        def augment_fn(batch_x: torch.Tensor, batch_y: torch.Tensor):
-            """
-            Parameters
-            ----------
-            batch_x : torch.Tensor
-                Input batch with shape (B, C, H, W).
-            batch_y : torch.Tensor
-                Target batch with shape (B, C_out, H, W).
+    augment_fn = make_pftd_augment_fn() if use_pftd else None
 
-            Returns
-            -------
-            (torch.Tensor, torch.Tensor)
-                Augmented inputs with the same shape as batch_x and the original targets.
-            """
-            B = batch_x.shape[0]
-            augmented = []
-            for b in range(B):
-                augmented.append(
-                    pftd_augment(
-                        batch_x[b],        # (C, H, W)
-                        keep_fraction=0.6,
-                        noise_std=0.01,
-                        pad_size=4,
-                        pad_mode="mirror",
-                    )
-                )
-            batch_x_aug = torch.stack(augmented, dim=0)
-            return batch_x_aug, batch_y
+    target_stats = compute_target_stats(data_path)
+    physics_loss_fn = None
+    lam = 0.0
+
+    if use_physics:
+        if x_min is None or x_max is None:
+            raise RuntimeError("meta['x_min'/'x_max'] missing: required for physics loss.")
+        physics_loss_fn = make_black_scholes_physics_loss(
+            x_min=x_min,
+            x_max=x_max,
+            lambda_barrier=1.0,
+            price_scale=target_stats["std"][0],
+        )
+        lam = lambda_phys
 
     print(
-        f"\n=== Experiment: {exp_name} | Model: {model_class.__name__} | "
-        f"Input augmentation (P-FTD): {use_pftd} ==="
+        f"\n=== {exp_name} | model={model_class.__name__} | pftd={use_pftd} | "
+        f"physics={use_physics} (lambda={lam}) ==="
     )
+
     train_model(
         model=model,
         train_loader=train_loader,
@@ -116,45 +141,111 @@ def run_experiment(
         optimizer=optimizer,
         device=device,
         num_epochs=num_epochs,
-        physics_loss_fn=None,
-        lambda_phys=0.0,
-        checkpoint_dir=checkpoint_dir,
+        physics_loss_fn=physics_loss_fn,
+        lambda_phys=lam,
+        checkpoint_dir=ckpt_dir,
         print_every=1,
+        scheduler=scheduler,
+        grad_clip=1.0,
         augment_fn=augment_fn,
+        target_stats=target_stats,
+        normalize_loss=True,
     )
 
 
 def main():
-    # (1) Baseline FNO on the reference dataset.
-    run_experiment(
+    data_path = "data/barrier_dataset.pt"
+
+    # Keep consistent with main training unless you intentionally want faster ablations
+    batch_size = 256
+    num_epochs = 200
+    lr = 3e-4
+    weight_decay = 1e-4
+    lambda_phys = 0.1
+
+    # --- 6 experiments ---
+    # 1) FNO plain
+    run_one(
         exp_name="fno_plain",
         model_class=FNOBarrier,
         use_pftd=False,
-        num_epochs=20,
+        use_physics=False,
+        data_path=data_path,
+        batch_size=batch_size,
+        num_epochs=num_epochs,
+        lr=lr,
+        weight_decay=weight_decay,
+        lambda_phys=lambda_phys,
     )
 
-    # (2) AFNO (mode-gated) on the same dataset, without augmentation.
-    run_experiment(
-        exp_name="afno_plain",
-        model_class=AFNOBarrier,
+    # 2) PINO plain (FNO + physics)
+    run_one(
+        exp_name="pino_plain",
+        model_class=FNOBarrierPINO,
         use_pftd=False,
-        num_epochs=20,
+        use_physics=True,
+        data_path=data_path,
+        batch_size=batch_size,
+        num_epochs=num_epochs,
+        lr=lr,
+        weight_decay=weight_decay,
+        lambda_phys=lambda_phys,
     )
 
-    # (3) FNO with P-FTD-style input augmentation.
-    run_experiment(
+    # 3) AFNO plain (AFNO + physics)
+    run_one(
+        exp_name="afno_plain",
+        model_class=AFNOBarrierPINO,
+        use_pftd=False,
+        use_physics=True,
+        data_path=data_path,
+        batch_size=batch_size,
+        num_epochs=num_epochs,
+        lr=lr,
+        weight_decay=weight_decay,
+        lambda_phys=lambda_phys,
+    )
+
+    # 4) FNO + PFTD
+    run_one(
         exp_name="fno_pftd",
         model_class=FNOBarrier,
         use_pftd=True,
-        num_epochs=20,
+        use_physics=False,
+        data_path=data_path,
+        batch_size=batch_size,
+        num_epochs=num_epochs,
+        lr=lr,
+        weight_decay=weight_decay,
+        lambda_phys=lambda_phys,
     )
 
-    # (4) AFNO with P-FTD-style input augmentation.
-    run_experiment(
-        exp_name="afno_pftd",
-        model_class=AFNOBarrier,
+    # 5) PINO + PFTD
+    run_one(
+        exp_name="pino_pftd",
+        model_class=FNOBarrierPINO,
         use_pftd=True,
-        num_epochs=20,
+        use_physics=True,
+        data_path=data_path,
+        batch_size=batch_size,
+        num_epochs=num_epochs,
+        lr=lr,
+        weight_decay=weight_decay,
+        lambda_phys=lambda_phys,
+    )
+
+    # 6) AFNO + PFTD
+    run_one(
+        exp_name="afno_pftd",
+        model_class=AFNOBarrierPINO,
+        use_pftd=True,
+        use_physics=True,
+        data_path=data_path,
+        batch_size=batch_size,
+        num_epochs=num_epochs,
+        lr=lr,
+        weight_decay=weight_decay,
+        lambda_phys=lambda_phys,
     )
 
 
