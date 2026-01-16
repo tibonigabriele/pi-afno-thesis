@@ -9,13 +9,8 @@ __pycache__/
 venv/
 
 # OS / editor
-.DS_Store
+# .DS_Store
 .vscode/
-
-# PyTorch / experiments
-*.pt
-*.pth
-checkpoints/
 
 # Logs
 *.log
