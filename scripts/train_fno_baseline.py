@@ -33,7 +33,7 @@ def main():
     device = get_device()
 
     data_path = "data/barrier_dataset.pt"
-    batch_size = 512
+    batch_size = 256
     num_epochs = 200
     lr = 3e-4
     weight_decay = 1e-4  # L2 regularization (weight decay)
