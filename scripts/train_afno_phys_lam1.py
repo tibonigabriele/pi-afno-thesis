@@ -45,7 +45,7 @@ def main():
     num_epochs = 200
     lr = 3e-4
     weight_decay = 1e-4
-    lambda_phys = 0.1
+    lambda_phys = 1.0
     checkpoint_dir = "checkpoints/afno_phys_full_lam1"
     ensure_dir(checkpoint_dir)
 
@@ -56,7 +56,7 @@ def main():
     train_loader, val_loader, meta = load_barrier_option_dataloaders(
         data_path=data_path,
         batch_size=batch_size,
-        val_ratio=1.0,
+        val_ratio=0.1,
         shuffle=True,
     )
 
