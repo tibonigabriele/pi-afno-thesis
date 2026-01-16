@@ -10,16 +10,12 @@
 #   those terms. Otherwise, all rights are reserved by the author.
 #
 # Notes on originality and references:
-# - The overall training-script structure (PyTorch dataloaders + model + optimizer
-#   + training loop) follows standard and widely-used patterns in the PyTorch
-#   ecosystem and is not uniquely attributable to a specific public repository.
-# - The models referenced by name are based on the literature on Neural Operators:
-#   * Fourier Neural Operator (FNO): Li et al., 2021.
-#   * Adaptive Fourier Neural Operator (AFNO): adaptive/gated spectral variants as
-#     used in recent operator-learning literature.
-# - The optional input augmentation is inspired by padding-based Fourier denoising
-#   / masking strategies described in the P-FTD line of work; here it is applied
-#   solely to inputs while keeping targets unchanged.
+# - The overall training-script structure follows standard PyTorch patterns.
+# - Neural Operators references:
+#   * FNO: Li et al., 2021.
+#   * AFNO-like: adaptive/gated spectral variants used in recent literature.
+# - Optional input augmentation inspired by padding-based Fourier denoising /
+#   masking strategies (P-FTD-like), applied to inputs only.
 # -----------------------------------------------------------------------------
 
 import torch
@@ -127,7 +123,7 @@ def run_one(
             lambda_barrier=1.0,
             price_scale=target_stats["std"][0],
         )
-        lam = lambda_phys
+        lam = float(lambda_phys)
 
     print(
         f"\n=== {exp_name} | model={model_class.__name__} | pftd={use_pftd} | "
@@ -161,92 +157,52 @@ def main():
     num_epochs = 200
     lr = 3e-4
     weight_decay = 1e-4
-    lambda_phys = 0.1
 
-    # --- 6 experiments ---
-    # 1) FNO plain
-    run_one(
-        exp_name="fno_plain",
-        model_class=FNOBarrier,
-        use_pftd=False,
-        use_physics=False,
-        data_path=data_path,
-        batch_size=batch_size,
-        num_epochs=num_epochs,
-        lr=lr,
-        weight_decay=weight_decay,
-        lambda_phys=lambda_phys,
-    )
+    # 8 base configs (then repeated with PFTD)
+    base_experiments = [
+        # --- FNO supervised ---
+        dict(exp_name="fno_plain", model_class=FNOBarrier, use_physics=False, lambda_phys=0.0),
+        # --- FNO PINO lambdas ---
+        dict(exp_name="fno_pino_lam001", model_class=FNOBarrierPINO, use_physics=True, lambda_phys=0.01),
+        dict(exp_name="fno_pino_lam01", model_class=FNOBarrierPINO, use_physics=True, lambda_phys=0.1),
+        dict(exp_name="fno_pino_lam1", model_class=FNOBarrierPINO, use_physics=True, lambda_phys=1.0),
+        # --- AFNO supervised (no-physics) ---
+        dict(exp_name="afno_no_phys", model_class=AFNOBarrierPINO, use_physics=False, lambda_phys=0.0),
+        # --- AFNO PINO lambdas ---
+        dict(exp_name="afno_phys_lam001", model_class=AFNOBarrierPINO, use_physics=True, lambda_phys=0.01),
+        dict(exp_name="afno_phys_lam01", model_class=AFNOBarrierPINO, use_physics=True, lambda_phys=0.1),
+        dict(exp_name="afno_phys_lam1", model_class=AFNOBarrierPINO, use_physics=True, lambda_phys=1.0),
+    ]
 
-    # 2) PINO plain (FNO + physics)
-    run_one(
-        exp_name="pino_plain",
-        model_class=FNOBarrierPINO,
-        use_pftd=False,
-        use_physics=True,
-        data_path=data_path,
-        batch_size=batch_size,
-        num_epochs=num_epochs,
-        lr=lr,
-        weight_decay=weight_decay,
-        lambda_phys=lambda_phys,
-    )
+    # --- 8 WITHOUT PFTD ---
+    for cfg in base_experiments:
+        run_one(
+            exp_name=cfg["exp_name"],
+            model_class=cfg["model_class"],
+            use_pftd=False,
+            use_physics=cfg["use_physics"],
+            data_path=data_path,
+            batch_size=batch_size,
+            num_epochs=num_epochs,
+            lr=lr,
+            weight_decay=weight_decay,
+            lambda_phys=cfg["lambda_phys"],
+        )
 
-    # 3) AFNO plain (AFNO + physics)
-    run_one(
-        exp_name="afno_plain",
-        model_class=AFNOBarrierPINO,
-        use_pftd=False,
-        use_physics=True,
-        data_path=data_path,
-        batch_size=batch_size,
-        num_epochs=num_epochs,
-        lr=lr,
-        weight_decay=weight_decay,
-        lambda_phys=lambda_phys,
-    )
-
-    # 4) FNO + PFTD
-    run_one(
-        exp_name="fno_pftd",
-        model_class=FNOBarrier,
-        use_pftd=True,
-        use_physics=False,
-        data_path=data_path,
-        batch_size=batch_size,
-        num_epochs=num_epochs,
-        lr=lr,
-        weight_decay=weight_decay,
-        lambda_phys=lambda_phys,
-    )
-
-    # 5) PINO + PFTD
-    run_one(
-        exp_name="pino_pftd",
-        model_class=FNOBarrierPINO,
-        use_pftd=True,
-        use_physics=True,
-        data_path=data_path,
-        batch_size=batch_size,
-        num_epochs=num_epochs,
-        lr=lr,
-        weight_decay=weight_decay,
-        lambda_phys=lambda_phys,
-    )
-
-    # 6) AFNO + PFTD
-    run_one(
-        exp_name="afno_pftd",
-        model_class=AFNOBarrierPINO,
-        use_pftd=True,
-        use_physics=True,
-        data_path=data_path,
-        batch_size=batch_size,
-        num_epochs=num_epochs,
-        lr=lr,
-        weight_decay=weight_decay,
-        lambda_phys=lambda_phys,
-    )
+    # --- 8 WITH PFTD ---
+    for cfg in base_experiments:
+        run_one(
+            exp_name=f'{cfg["exp_name"]}_pftd',
+            model_class=cfg["model_class"],
+            use_pftd=True,
+            use_physics=cfg["use_physics"],
+            data_path=data_path,
+            batch_size=batch_size,
+            num_epochs=num_epochs,
+            lr=lr,
+            weight_decay=weight_decay,
+            lambda_phys=cfg["lambda_phys"],
+        )
 
 
 if __name__ == "__main__":
