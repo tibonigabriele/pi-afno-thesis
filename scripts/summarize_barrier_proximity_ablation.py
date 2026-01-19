@@ -41,21 +41,21 @@ import pandas as pd
 ABLATION_16_EXP_NAMES = [
     # --- 8 base ---
     "fno_plain",
-    "fno_pino_lam001",
-    "fno_pino_lam01",
+    "fno_pino_lam0",
+    "fno_pino",
     "fno_pino_lam1",
     "afno_no_phys",
-    "afno_phys_lam001",
-    "afno_phys_lam01",
+    "afno_phys_lam0",
+    "afno_phys",
     "afno_phys_lam1",
     # --- 8 + PFTD ---
     "fno_plain_pftd",
-    "fno_pino_lam001_pftd",
-    "fno_pino_lam01_pftd",
+    "fno_pino_lam0_pftd",
+    "fno_pino_pftd",
     "fno_pino_lam1_pftd",
     "afno_no_phys_pftd",
-    "afno_phys_lam001_pftd",
-    "afno_phys_lam01_pftd",
+    "afno_phys_lam0_pftd",
+    "afno_phys_pftd",
     "afno_phys_lam1_pftd",
 ]
 

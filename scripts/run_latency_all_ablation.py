@@ -78,14 +78,14 @@ def main() -> None:
         ),
         # FNO PINO (lambda sweep)
         ModelCfg(
-            exp_name="fno_pino_lam001",
+            exp_name="fno_pino_lam0",
             model_type="fno_pino",
-            checkpoint_path="checkpoints/ablation_fno_pino_lam001/best_model.pt",
+            checkpoint_path="checkpoints/ablation_fno_pino_lam0/best_model.pt",
         ),
         ModelCfg(
-            exp_name="fno_pino_lam01",
+            exp_name="fno_pino",
             model_type="fno_pino",
-            checkpoint_path="checkpoints/ablation_fno_pino_lam01/best_model.pt",
+            checkpoint_path="checkpoints/ablation_fno_pino/best_model.pt",
         ),
         ModelCfg(
             exp_name="fno_pino_lam1",
@@ -100,14 +100,14 @@ def main() -> None:
         ),
         # AFNO PINO (lambda sweep)
         ModelCfg(
-            exp_name="afno_phys_lam001",
+            exp_name="afno_phys_lam0",
             model_type="afno_pino",
-            checkpoint_path="checkpoints/ablation_afno_phys_lam001/best_model.pt",
+            checkpoint_path="checkpoints/ablation_afno_phys_lam0/best_model.pt",
         ),
         ModelCfg(
-            exp_name="afno_phys_lam01",
+            exp_name="afno_phys",
             model_type="afno_pino",
-            checkpoint_path="checkpoints/ablation_afno_phys_lam01/best_model.pt",
+            checkpoint_path="checkpoints/ablation_afno_phys/best_model.pt",
         ),
         ModelCfg(
             exp_name="afno_phys_lam1",
