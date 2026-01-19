@@ -46,11 +46,11 @@ def main():
     base = [
         "fno_plain",
         "fno_pino_lam0",
-        "fno_pino_lam",
+        "fno_pino",
         "fno_pino_lam1",
         "afno_no_phys",
         "afno_phys_lam0",
-        "afno_phys_lam",
+        "afno_phys",
         "afno_phys_lam1",
     ]
     experiments = base + [f"{e}_pftd" for e in base]

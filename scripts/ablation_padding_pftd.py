@@ -170,7 +170,7 @@ def main():
         dict(exp_name="afno_no_phys", model_class=AFNOBarrierPINO, use_physics=False, lambda_phys=0.0),
         # --- AFNO PINO lambdas ---
         dict(exp_name="afno_phys_lam0", model_class=AFNOBarrierPINO, use_physics=True, lambda_phys=0.01),
-        dict(exp_name="afno_phys_lam", model_class=AFNOBarrierPINO, use_physics=True, lambda_phys=0.1),
+        dict(exp_name="afno_phys", model_class=AFNOBarrierPINO, use_physics=True, lambda_phys=0.1),
         dict(exp_name="afno_phys_lam1", model_class=AFNOBarrierPINO, use_physics=True, lambda_phys=1.0),
     ]
 
